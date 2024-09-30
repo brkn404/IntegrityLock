@@ -1,0 +1,72 @@
+
+# Sample Ansible Playbook 
+#
+# ansible-playbook -i hosts integritylock.yml
+
+---
+- name: IntegrityLock Workflow Automation
+  hosts: all
+  become: yes
+  vars:
+    suse_server: suse_server_ip
+    aix_server: aix_server_ip
+    policy_name: "YourPolicyName"
+    nfs_mounts:
+      - "/export/data1"
+      - "/export/data2"
+  
+  tasks:
+    - name: Step 1 - Recover and present snapshot on IBM Flash
+      delegate_to: "{{ aix_server }}"
+      shell: |
+        python3 /path/to/ibm_flash.py
+      ignore_errors: yes
+      register: flash_result
+      failed_when: "'failed' in flash_result.stderr"
+
+    - name: Step 2 - Import VG, mount filesystems, and export NFS on AIX server
+      delegate_to: "{{ aix_server }}"
+      shell: |
+        python3 /path/to/aix_nfs.py
+      ignore_errors: yes
+      register: aix_result
+      failed_when: "'failed' in aix_result.stderr"
+
+    - name: Step 3a - Start CyberSense scan on SUSE server
+      delegate_to: "{{ suse_server }}"
+      shell: |
+        python3 /path/to/suse_scan.py --policy "{{ policy_name }}" --nfs_mounts "{{ nfs_mounts | join(',') }}"
+      ignore_errors: yes
+      register: scan_result
+      failed_when: "'failed' in scan_result.stderr"
+
+    - name: Step 3b - Run backup process
+      delegate_to: "{{ inventory_hostname }}"
+      shell: |
+        python3 /path/to/backup.py
+      ignore_errors: yes
+      register: backup_result
+      failed_when: "'failed' in backup_result.stderr"
+      
+    - name: Wait for scan and backup to finish
+      wait_for:
+        timeout: 3600
+      async: 3600
+      poll: 0
+
+    - name: Step 4 - Generate and send report
+      delegate_to: "{{ inventory_hostname }}"
+      shell: |
+        python3 /path/to/report.py
+      ignore_errors: yes
+      register: report_result
+      failed_when: "'failed' in report_result.stderr"
+
+    - name: Step 5 - Cleanup (Optional)
+      when: cleanup_enabled | default(true)
+      delegate_to: "{{ aix_server }}"
+      shell: |
+        python3 /path/to/cleanup.py
+      ignore_errors: yes
+      register: cleanup_result
+      failed_when: "'failed' in cleanup_result.stderr"

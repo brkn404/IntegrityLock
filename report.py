@@ -1,26 +1,78 @@
 import smtplib
 from email.mime.text import MIMEText
 import logging
+import paramiko
+import re
+import os
 
 # Set up logging
 logging.basicConfig(filename='report_log.out', level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-def gather_scan_results():
+def ssh_retrieve_log(remote_host, remote_user, remote_password, remote_log_path, local_log_path):
     """
-    Gather scan results from the CyberSense process.
-    This function reads from run_log.out to check for scan status and details.
+    Retrieve the run_log.out file from the remote scan engine server using SSH.
     """
     try:
-        logging.info("Gathering CyberSense scan results...")
-        with open("run_log.out", "r") as log_file:
-            scan_results = log_file.read()
-        logging.info("Successfully gathered scan results.")
-        return scan_results
+        logging.info(f"Connecting to remote host {remote_host} to retrieve the log file...")
+        
+        # Set up SSH connection
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(remote_host, username=remote_user, password=remote_password)
+
+        # Use SFTP to retrieve the log file
+        sftp = ssh.open_sftp()
+        sftp.get(remote_log_path, local_log_path)
+        sftp.close()
+
+        logging.info("Successfully retrieved the run log from the remote server.")
+    except Exception as e:
+        logging.error(f"Failed to retrieve log from remote server: {e}")
+        raise e
+    finally:
+        ssh.close()
+
+def parse_run_log(local_log_path):
+    """
+    Parse the run_log.out file to extract key scan details.
+    """
+    try:
+        logging.info("Parsing CyberSense run log...")
+        with open(local_log_path, "r") as log_file:
+            log_contents = log_file.read()
+        
+        # Extract relevant details (example patterns, adjust as necessary)
+        total_bytes_pattern = r"Processed\s([0-9]+)\sbytes"
+        elapsed_time_pattern = r"Real=([0-9.]+)s"
+        files_scanned_pattern = r"nfiles_scanned=([0-9]+)"
+        warnings_pattern = r"warning: (.*)"
+
+        total_bytes = re.search(total_bytes_pattern, log_contents)
+        elapsed_time = re.search(elapsed_time_pattern, log_contents)
+        files_scanned = re.search(files_scanned_pattern, log_contents)
+        warnings = re.findall(warnings_pattern, log_contents)
+
+        # Format the report from parsed details
+        report = f"Processed Bytes: {total_bytes.group(1)}\n" if total_bytes else "Processed Bytes: N/A\n"
+        report += f"Elapsed Time: {elapsed_time.group(1)} seconds\n" if elapsed_time else "Elapsed Time: N/A\n"
+        report += f"Files Scanned: {files_scanned.group(1)}\n" if files_scanned else "Files Scanned: N/A\n"
+        
+        if warnings:
+            report += "Warnings:\n" + "\n".join(warnings) + "\n"
+        else:
+            report += "Warnings: None\n"
+
+        logging.info("Successfully parsed scan results.")
+        return report
+
     except FileNotFoundError as e:
-        logging.error(f"Scan log file not found: {e}")
-        return "Scan results log file not found."
-    
+        logging.error(f"Run log file not found: {e}")
+        return "Run log file not found."
+    except Exception as e:
+        logging.error(f"Error parsing run log: {e}")
+        return f"Error parsing run log: {e}"
+
 def gather_backup_results():
     """
     Gather backup results from the IBM Spectrum Protect process.
@@ -74,8 +126,23 @@ def send_report(report, recipient_email):
         logging.error(f"Failed to send report: {e}")
 
 if __name__ == "__main__":
-    # Gather the scan and backup results
-    scan_results = gather_scan_results()
+    # Define remote server credentials and paths
+    remote_host = "remote_scan_engine_host"
+    remote_user = "username"
+    remote_password = "password"
+    remote_log_path = "/remote/path/to/run_log.out"
+    local_log_path = "run_log.out"
+    
+    # Retrieve the log file via SSH
+    try:
+        ssh_retrieve_log(remote_host, remote_user, remote_password, remote_log_path, local_log_path)
+
+        # Parse the log file and gather scan results
+        scan_results = parse_run_log(local_log_path)
+    except Exception as e:
+        scan_results = f"Error retrieving or parsing scan log: {e}"
+
+    # Gather backup results
     backup_results = gather_backup_results()
     
     # Generate the report
@@ -84,3 +151,7 @@ if __name__ == "__main__":
     # Send the report
     recipient_email = "recipient@example.com"
     send_report(report, recipient_email)
+
+    # Clean up local log file if necessary
+    if os.path.exists(local_log_path):
+        os.remove(local_log_path)

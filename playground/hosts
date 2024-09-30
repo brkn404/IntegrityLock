@@ -1,0 +1,11 @@
+#   Ansible inventory file
+
+
+[suse]
+192.168.1.10 ansible_user=root
+
+[aix]
+192.168.1.11 ansible_user=aixadmin ansible_ssh_pass=mysecretpassword
+
+[backup]
+192.168.1.12 ansible_user=backupadmin

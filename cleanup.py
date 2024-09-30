@@ -21,6 +21,19 @@ def ssh_execute_command(ssh_client, command):
     logging.info(f"Command succeeded: {command}, Output: {output}")
     return output
 
+def check_and_kill_open_files(fs):
+    """
+    Check for open files on the file system using fuser and kill them.
+    """
+    try:
+        logging.info(f"Checking for open files on {fs}")
+        check_command = f"sudo fuser -km {fs}"
+        subprocess.run(check_command, shell=True, check=True)
+        logging.info(f"Open files on {fs} have been closed.")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to close open files on {fs}: {e}")
+        raise
+
 def unmount_nfs_on_suse(suse_ip, suse_user, nfs_mounts):
     """
     Unmounts NFS shares on the SUSE server.
@@ -32,6 +45,9 @@ def unmount_nfs_on_suse(suse_ip, suse_user, nfs_mounts):
         ssh.connect(suse_ip, username=suse_user)
 
         for mount_point in nfs_mounts:
+            logging.info(f"Running fuser check on {mount_point} to close open files.")
+            check_and_kill_open_files(mount_point)
+
             unmount_command = f"sudo umount {mount_point}"
             logging.info(f"Unmounting NFS share at {mount_point}")
             ssh_execute_command(ssh, unmount_command)
@@ -48,6 +64,9 @@ def unmount_file_systems_on_aix(file_systems):
     """
     try:
         for fs in file_systems:
+            logging.info(f"Running fuser check on {fs} to close open files.")
+            check_and_kill_open_files(fs)
+
             logging.info(f"Unmounting file system {fs}")
             unmount_command = f"umount {fs}"
             subprocess.run(unmount_command, shell=True, check=True)
